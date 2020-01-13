@@ -1,14 +1,84 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 
 namespace Frame.Data
 {
+    public interface IMapper<T>
+    {
+        T Map(CSVRow row);
+    }
+
+    [System.AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
+    public class MapMemberAttribute : Attribute
+    {
+    }
+
+    public class ReflectionMapper<T> : IMapper<T>
+    {
+        static IEnumerable<FieldInfo> fields;
+        static IEnumerable<PropertyInfo> properties;
+
+        static ReflectionMapper()
+        {
+            Type t = typeof(T);
+            fields = t.GetFields().Where((v) => Attribute.GetCustomAttribute(v, typeof(MapMemberAttribute)) != null);
+            properties = t.GetProperties().Where((v) => Attribute.GetCustomAttribute(v, typeof(MapMemberAttribute)) != null && v.CanWrite && v.CanRead);
+        }
+
+        static void MemberSetValue(Type type, Action<object> setFunc, string valueStr)
+        {
+            if (type.IsAssignableFrom(typeof(int)))
+                setFunc(Convert.ToInt32(valueStr));
+            else if (type.IsAssignableFrom(typeof(uint)))
+                setFunc(Convert.ToUInt32(valueStr));
+            else if (type.IsAssignableFrom(typeof(string)))
+                setFunc(valueStr);
+            else if (type.IsAssignableFrom(typeof(float)))
+                setFunc(Convert.ToSingle(valueStr));
+        }
+
+        public T Map(CSVRow row)
+        {
+            T inst = (T)Activator.CreateInstance(typeof(T));
+            foreach (var fieldInfo in fields)
+            {
+                Type fieldType = fieldInfo.FieldType;
+
+                string valueStr = row.GetEntry(fieldInfo.Name)?.content;
+
+                if (valueStr == null)
+                    continue;
+
+                if (valueStr == string.Empty && fieldType != typeof(string))
+                    continue;
+
+                MemberSetValue(fieldType, (obj) => fieldInfo.SetValue(inst, obj), valueStr);
+            }
+
+            foreach (var propertyInfo in properties)
+            {
+                Type propertyType = propertyInfo.PropertyType;
+
+                string valueStr = row.GetEntry(propertyInfo.Name).content;
+                if (string.IsNullOrEmpty(valueStr) && propertyType != typeof(string))
+                    continue;
+
+                MemberSetValue(propertyType, (obj) => propertyInfo.SetValue(inst, obj, null), valueStr);
+            }
+
+            return inst;
+        }
+    }
+
     /// <summary>
     /// 数据表
     /// </summary>
-    public class CSVTable
+    public class CSVTable : IEnumerable<CSVRow>
     {
         private List<CSVTitle> _titles;
         private List<CSVRow> _rows;
@@ -202,6 +272,33 @@ namespace Frame.Data
                 return keyEntry != null && match(keyEntry);
             });
         }
+
+        /// <summary>
+        /// 将每一行映射到特定类型对象
+        /// </summary>
+        /// <typeparam name="T">目标类型</typeparam>
+        /// <param name="mapper">映射方法</param>
+        /// <returns></returns>
+        public List<T> MapTo<T>(IMapper<T> mapper)
+        {
+            List<T> result = new List<T>();
+            for (int i = 0; i < _rows.Count; ++i)
+            {
+                T r = mapper.Map(_rows[i]);
+                result.Add(r);
+            }
+            return result;
+        }
+
+        public IEnumerator<CSVRow> GetEnumerator()
+        {
+            return _rows.GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return _rows.GetEnumerator();
+        }
     }
 
     /// <summary>
@@ -348,7 +445,7 @@ namespace Frame.Data
             }
         }
 
-        public static explicit operator int (CSVEntry entry)
+        public static explicit operator int(CSVEntry entry)
         {
             entry.CheckAndCache();
             if (entry._title.dataType != DataType.Integer &&
@@ -358,7 +455,7 @@ namespace Frame.Data
             return entry._numberHolder.Value.intValue;
         }
 
-        public static explicit operator bool (CSVEntry entry)
+        public static explicit operator bool(CSVEntry entry)
         {
             entry.CheckAndCache();
             if (entry._title.dataType != DataType.Bool &&
@@ -368,12 +465,12 @@ namespace Frame.Data
             return entry._numberHolder.Value.boolValue;
         }
 
-        public static explicit operator string (CSVEntry entry)
+        public static explicit operator string(CSVEntry entry)
         {
             return entry.content;
         }
 
-        public static explicit operator float (CSVEntry entry)
+        public static explicit operator float(CSVEntry entry)
         {
             entry.CheckAndCache();
             if (entry._title.dataType != DataType.Float &&

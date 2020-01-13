@@ -179,3 +179,22 @@ var rowsInRange = table.FindRows((row)=>{
 //创建CSVReader时，传入解析器实例
 CSVReader reader =  new CSVReader(new ResolverWithType());
 ```
+
+* ObjectModel映射
+
+```csharp
+public class TestInfo
+{
+    [MapMember] public float floatVal;
+    [MapMember] public int intVal;
+    [MapMember] public string strVal;
+    [MapMember] public uint uintVal;
+}
+
+string content = File.ReadAllText("test.csv");
+CSVReader reader = new CSVReader();
+CSVTable table = reader.LoadTable(content);
+List<TestInfo> infos = table.MapTo(new ReflectionMapper<TestInfo>());
+```
+
+通过调用 `CSVTable.MapTo<T>(IMap<T> mapper)` 将CSV数据行，映射到类型对象，默认实现了通过反射的映射实现，能够完成 `MapMember` 特性标记的字段、属性成员的设置。
